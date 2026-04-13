@@ -49,14 +49,20 @@ class CheckResult():
         raise SystemExit(self._exitcode)
 
 class IncidentList():
-    def __init__(self, page_id):
-        url = 'https://{0}.statuspage.io/api/v2/incidents/unresolved.json'
-        self._url = url.format(page_id)
+    def __init__(self, page_id, api_key=None, url=None):
+        if url:
+            self._url = '{0}/api/v2/incidents/unresolved.json'.format(url.rstrip('/'))
+        else:
+            self._url = 'https://{0}.statuspage.io/api/v2/incidents/unresolved.json'.format(page_id)
+        self._api_key = api_key
         self._load()
 
     def _load(self):
         #request the json from statuspage
-        r = requests.get(self._url)
+        params = {}
+        if self._api_key:
+            params['api_key'] = self._api_key
+        r = requests.get(self._url, params=params)
         incidents_json = r.text
         self._data = json.loads(incidents_json)
 
@@ -76,8 +82,10 @@ def main(args):
 
     # load the unresolved incidents json
     page_id = args.get('page_id')
+    api_key = args.get('api_key')
+    url = args.get('url')
     try:
-        incidents = IncidentList(page_id)
+        incidents = IncidentList(page_id, api_key=api_key, url=url)
     except:
         result.set_code(UNKNOWN)
         result.set_message('UNKNOWN: Could not load incidents for page {0}'.format(page_id))
@@ -98,6 +106,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='statuspage.io nagios check')
     parser.add_argument('page_id', help='statuspage.io page id')
+    parser.add_argument('--api-key', dest='api_key', default=None, help='API key for authentication')
+    parser.add_argument('--url', dest='url', default=None, help='custom base URL for the status page (overrides page_id subdomain)')
 
     args = parser.parse_args()
     main(vars(args))

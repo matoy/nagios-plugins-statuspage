@@ -52,13 +52,19 @@ class CheckResult():
         raise SystemExit(self._exitcode)
 
 class ComponentsList():
-    def __init__(self, page_id):
-        url = 'https://{0}.statuspage.io/api/v2/components.json'
-        self._url = url.format(page_id)
+    def __init__(self, page_id, api_key=None, url=None):
+        if url:
+            self._url = '{0}/api/v2/components.json'.format(url.rstrip('/'))
+        else:
+            self._url = 'https://{0}.statuspage.io/api/v2/components.json'.format(page_id)
+        self._api_key = api_key
     
     def load(self):
         # request the json from statuspage
-        r = requests.get(self._url)
+        params = {}
+        if self._api_key:
+            params['api_key'] = self._api_key
+        r = requests.get(self._url, params=params)
         components_json = r.text
         
         self._data = json.loads(components_json)
@@ -83,7 +89,9 @@ def main(args):
 
     # load the components json
     page_id = args.get('page_id')
-    components = ComponentsList(page_id)
+    api_key = args.get('api_key')
+    url = args.get('url')
+    components = ComponentsList(page_id, api_key=api_key, url=url)
     try:
         components.load()
     except JSONDecodeError:
@@ -126,6 +134,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='statuspage.io nagios check')
     parser.add_argument('page_id', help='statuspage.io page id')
     parser.add_argument('component_id', help='component id')
+    parser.add_argument('--api-key', dest='api_key', default=None, help='API key for authentication')
+    parser.add_argument('--url', dest='url', default=None, help='custom base URL for the status page (overrides page_id subdomain)')
 
     # args = {}
     args = parser.parse_args()
