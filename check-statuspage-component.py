@@ -52,11 +52,8 @@ class CheckResult():
         raise SystemExit(self._exitcode)
 
 class ComponentsList():
-    def __init__(self, page_id, api_key=None, url=None):
-        if url:
-            self._url = '{0}/api/v2/components.json'.format(url.rstrip('/'))
-        else:
-            self._url = 'https://{0}.statuspage.io/api/v2/components.json'.format(page_id)
+    def __init__(self, page_id, api_key=None):
+        self._url = 'https://{0}.statuspage.io/api/v2/components.json'.format(page_id)
         self._api_key = api_key
     
     def load(self):
@@ -83,6 +80,9 @@ class ComponentsList():
 
                 return c
 
+    def get_all_components(self):
+        return self._data.get('components', [])
+
 def main(args):
     #create the result
     result = CheckResult()
@@ -90,8 +90,7 @@ def main(args):
     # load the components json
     page_id = args.get('page_id')
     api_key = args.get('api_key')
-    url = args.get('url')
-    components = ComponentsList(page_id, api_key=api_key, url=url)
+    components = ComponentsList(page_id, api_key=api_key)
     try:
         components.load()
     except JSONDecodeError:
@@ -102,40 +101,74 @@ def main(args):
 
     # find the component
     component_id = args.get('component_id')
-    component = components.get_component(component_id)
-    
-    # return unknown if component not found
-    if component is None:
-        message = 'UNKNOWN: component {0} not found'.format(component_id)
-        result.set_message(message)
-        result.set_code(UNKNOWN)
-        result.send()
-        
-    # perform check logic
-    status = component.get('status')
-    name = component.get('name')
 
-    if status == OPERATIONAL:
-        message = 'OK: {0} is {1}'.format(name, status)
-        result.set_message(message)
-        result.set_code(OK)
-    elif status == DEGRADED_PERFORMANCE:
-        message = 'WARNING: {0} is {1}'.format(name, status)
-        result.set_message(message)
-        result.set_code(WARNING)
-    elif status == PARTIAL_OUTAGE or status == MAJOR_OUTAGE:
-        message = 'CRITICAL: {0} is {1}'.format(name, status)
-        result.set_message(message)
-        result.set_code(CRITICAL)
+    if component_id:
+        component = components.get_component(component_id)
+        
+        # return unknown if component not found
+        if component is None:
+            message = 'UNKNOWN: component {0} not found'.format(component_id)
+            result.set_message(message)
+            result.set_code(UNKNOWN)
+            result.send()
+            
+        # perform check logic
+        status = component.get('status')
+        name = component.get('name')
+
+        if status == OPERATIONAL:
+            message = 'OK: {0} is {1}'.format(name, status)
+            result.set_message(message)
+            result.set_code(OK)
+        elif status == DEGRADED_PERFORMANCE:
+            message = 'WARNING: {0} is {1}'.format(name, status)
+            result.set_message(message)
+            result.set_code(WARNING)
+        elif status == PARTIAL_OUTAGE or status == MAJOR_OUTAGE:
+            message = 'CRITICAL: {0} is {1}'.format(name, status)
+            result.set_message(message)
+            result.set_code(CRITICAL)
+        else:
+            message = 'UNKNOWN: {0} is {1}'.format(name, status)
+            result.set_message(message)
+            result.set_code(UNKNOWN)
+    else:
+        # check all components and report worst status
+        all_components = components.get_all_components()
+        worst_code = OK
+        non_operational = []
+
+        for c in all_components:
+            status = c.get('status')
+            name = c.get('name')
+            if status == MAJOR_OUTAGE or status == PARTIAL_OUTAGE:
+                worst_code = CRITICAL
+                non_operational.append('{0}: {1}'.format(name, status))
+            elif status == DEGRADED_PERFORMANCE:
+                if worst_code < WARNING:
+                    worst_code = WARNING
+                non_operational.append('{0}: {1}'.format(name, status))
+            elif status != OPERATIONAL:
+                non_operational.append('{0}: {1}'.format(name, status))
+
+        if worst_code == OK:
+            result.set_message('OK: All components are operational')
+        elif worst_code == WARNING:
+            result.set_message('WARNING: {0} component(s) are not fully operational'.format(len(non_operational)))
+        else:
+            result.set_message('CRITICAL: {0} component(s) are not fully operational'.format(len(non_operational)))
+
+        if non_operational:
+            result.set_longmessage('\n'.join(non_operational))
+        result.set_code(worst_code)
 
     result.send()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='statuspage.io nagios check')
     parser.add_argument('page_id', help='statuspage.io page id')
-    parser.add_argument('component_id', help='component id')
+    parser.add_argument('component_id', nargs='?', default=None, help='component id (optional; checks all components if omitted)')
     parser.add_argument('--api-key', dest='api_key', default=None, help='API key for authentication')
-    parser.add_argument('--url', dest='url', default=None, help='custom base URL for the status page (overrides page_id subdomain)')
 
     # args = {}
     args = parser.parse_args()

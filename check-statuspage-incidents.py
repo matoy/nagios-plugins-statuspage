@@ -49,11 +49,8 @@ class CheckResult():
         raise SystemExit(self._exitcode)
 
 class IncidentList():
-    def __init__(self, page_id, api_key=None, url=None):
-        if url:
-            self._url = '{0}/api/v2/incidents/unresolved.json'.format(url.rstrip('/'))
-        else:
-            self._url = 'https://{0}.statuspage.io/api/v2/incidents/unresolved.json'.format(page_id)
+    def __init__(self, page_id, api_key=None):
+        self._url = 'https://{0}.statuspage.io/api/v2/incidents/unresolved.json'.format(page_id)
         self._api_key = api_key
         self._load()
 
@@ -66,12 +63,25 @@ class IncidentList():
         incidents_json = r.text
         self._data = json.loads(incidents_json)
 
-    def get_incident_count(self):
-        return len(self._data.get('incidents'))
+    def get_incidents(self, component=None, min_impact=None):
+        impact_order = ['none', 'minor', 'major', 'critical']
+        incidents = self._data.get('incidents', [])
+        filtered = []
+        for i in incidents:
+            if component:
+                affected = [c.get('name', '') for c in i.get('components', [])]
+                affected_ids = [c.get('id', '') for c in i.get('components', [])]
+                if component not in affected and component not in affected_ids:
+                    continue
+            if min_impact:
+                impact = i.get('impact', 'none')
+                if impact_order.index(impact) < impact_order.index(min_impact):
+                    continue
+            filtered.append(i)
+        return filtered
 
-    def get_incident_summary(self):
+    def get_incident_summary(self, incidents):
         summary = ''
-        incidents = self._data.get('incidents')
         for i in incidents:
             summary += '{2}: {1} ({0})\n'.format(i.get('shortlink'), i.get('name'), i.get('status').capitalize())
         return summary
@@ -83,23 +93,25 @@ def main(args):
     # load the unresolved incidents json
     page_id = args.get('page_id')
     api_key = args.get('api_key')
-    url = args.get('url')
+    component = args.get('component')
+    min_impact = args.get('impact')
     try:
-        incidents = IncidentList(page_id, api_key=api_key, url=url)
+        incidents = IncidentList(page_id, api_key=api_key)
     except:
         result.set_code(UNKNOWN)
         result.set_message('UNKNOWN: Could not load incidents for page {0}'.format(page_id))
         result.send()
 
-    # perform check login
-    count = incidents.get_incident_count()
+    # perform check logic
+    filtered = incidents.get_incidents(component=component, min_impact=min_impact)
+    count = len(filtered)
     if count == 0:
         result.set_code(OK)
         result.set_message('OK: No unresolved incidents')
     elif count > 0:
         result.set_code(CRITICAL)
         result.set_message('CRITICAL: {0} unresolved incidents(s) reported'.format(count))
-        result.set_longmessage(incidents.get_incident_summary())
+        result.set_longmessage(incidents.get_incident_summary(filtered))
     result.send()
 
 
@@ -107,7 +119,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='statuspage.io nagios check')
     parser.add_argument('page_id', help='statuspage.io page id')
     parser.add_argument('--api-key', dest='api_key', default=None, help='API key for authentication')
-    parser.add_argument('--url', dest='url', default=None, help='custom base URL for the status page (overrides page_id subdomain)')
+    parser.add_argument('--component', dest='component', default=None, help='filter incidents by affected component name or id')
+    parser.add_argument('--impact', dest='impact', default=None, choices=['none', 'minor', 'major', 'critical'],
+                        help='minimum impact level to report (none/minor/major/critical)')
 
     args = parser.parse_args()
     main(vars(args))
