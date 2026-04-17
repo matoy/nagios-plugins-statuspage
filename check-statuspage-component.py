@@ -8,6 +8,7 @@
 import argparse
 import datetime
 import json
+import re
 import requests
 import urllib3
 from json.decoder import JSONDecodeError
@@ -138,6 +139,18 @@ def main(args):
     else:
         # check all components and report worst status
         all_components = components.get_all_components()
+
+        # apply optional regexp filter on component name
+        filter_pattern = args.get('filter')
+        if filter_pattern:
+            try:
+                all_components = [c for c in all_components if re.search(filter_pattern, c.get('name', ''))]
+            except re.error as e:
+                message = 'UNKNOWN: invalid filter regexp: {0}'.format(e)
+                result.set_message(message)
+                result.set_code(UNKNOWN)
+                result.send()
+
         worst_code = OK
         non_operational = []
 
@@ -187,6 +200,7 @@ if __name__ == "__main__":
     parser.add_argument('component_id', nargs='?', default=None, help='component id (optional; checks all components if omitted)')
     parser.add_argument('--api-key', dest='api_key', default=None, help='API key for authentication')
     parser.add_argument('--details', action='store_true', default=False, help='show detailed output for each component')
+    parser.add_argument('--filter', dest='filter', default=None, help='regexp pattern to filter components by name (applies when no component_id is given)')
 
     # args = {}
     args = parser.parse_args()
