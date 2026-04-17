@@ -9,7 +9,10 @@ import argparse
 import datetime
 import json
 import requests
+import urllib3
 from json.decoder import JSONDecodeError
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Nagios return codes
 OK = 0
@@ -61,7 +64,7 @@ class ComponentsList():
         params = {}
         if self._api_key:
             params['api_key'] = self._api_key
-        r = requests.get(self._url, params=params)
+        r = requests.get(self._url, params=params, verify=False)
         components_json = r.text
         
         self._data = json.loads(components_json)
@@ -158,9 +161,23 @@ def main(args):
         else:
             result.set_message('CRITICAL: {0} component(s) are not fully operational'.format(len(non_operational)))
 
-        if non_operational:
+        if args.get('details'):
+            all_lines = ['{0}: {1}'.format(c.get('name'), c.get('status')) for c in all_components]
+            result.set_longmessage('\n'.join(all_lines))
+        elif non_operational:
             result.set_longmessage('\n'.join(non_operational))
         result.set_code(worst_code)
+
+    if component_id and args.get('details') and component:
+        details_lines = []
+        description = component.get('description') or ''
+        if description:
+            details_lines.append('Description: {0}'.format(description))
+        updated_at = component.get('updated_at') or ''
+        if updated_at:
+            details_lines.append('Last updated: {0}'.format(updated_at))
+        if details_lines:
+            result.set_longmessage('\n'.join(details_lines))
 
     result.send()
 
@@ -169,6 +186,7 @@ if __name__ == "__main__":
     parser.add_argument('page_id', help='statuspage.io page id')
     parser.add_argument('component_id', nargs='?', default=None, help='component id (optional; checks all components if omitted)')
     parser.add_argument('--api-key', dest='api_key', default=None, help='API key for authentication')
+    parser.add_argument('--details', action='store_true', default=False, help='show detailed output for each component')
 
     # args = {}
     args = parser.parse_args()

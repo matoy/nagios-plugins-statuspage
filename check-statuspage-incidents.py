@@ -9,7 +9,10 @@ import argparse
 import datetime
 import json
 import requests
+import urllib3
 from json.decoder import JSONDecodeError
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Nagios return codes
 OK = 0
@@ -59,7 +62,7 @@ class IncidentList():
         params = {}
         if self._api_key:
             params['api_key'] = self._api_key
-        r = requests.get(self._url, params=params)
+        r = requests.get(self._url, params=params, verify=False)
         incidents_json = r.text
         self._data = json.loads(incidents_json)
 
@@ -86,6 +89,26 @@ class IncidentList():
             summary += '{2}: {1} ({0})\n'.format(i.get('shortlink'), i.get('name'), i.get('status').capitalize())
         return summary
 
+    def get_incident_details(self, incidents):
+        lines = []
+        for i in incidents:
+            lines.append('{0}: {1} (Impact: {2}) - {3}'.format(
+                i.get('status', '').capitalize(),
+                i.get('name', ''),
+                i.get('impact', 'none'),
+                i.get('shortlink', '')
+            ))
+            affected = [c.get('name', '') for c in i.get('components', [])]
+            if affected:
+                lines.append('  Affected components: {0}'.format(', '.join(affected)))
+            updates = i.get('incident_updates', [])
+            if updates:
+                body = updates[0].get('body', '')
+                if body:
+                    lines.append('  Latest update: {0}'.format(body))
+            lines.append('')
+        return '\n'.join(lines).rstrip()
+
 def main(args):
     # create the result
     result = CheckResult()
@@ -111,7 +134,10 @@ def main(args):
     elif count > 0:
         result.set_code(CRITICAL)
         result.set_message('CRITICAL: {0} unresolved incidents(s) reported'.format(count))
-        result.set_longmessage(incidents.get_incident_summary(filtered))
+        if args.get('details'):
+            result.set_longmessage(incidents.get_incident_details(filtered))
+        else:
+            result.set_longmessage(incidents.get_incident_summary(filtered))
     result.send()
 
 
@@ -122,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--component', dest='component', default=None, help='filter incidents by affected component name or id')
     parser.add_argument('--impact', dest='impact', default=None, choices=['none', 'minor', 'major', 'critical'],
                         help='minimum impact level to report (none/minor/major/critical)')
+    parser.add_argument('--details', action='store_true', default=False, help='show detailed output for each incident')
 
     args = parser.parse_args()
     main(vars(args))
